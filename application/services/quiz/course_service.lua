@@ -18,7 +18,6 @@ CourseService.__index = CourseService
 
 -- -------- Config (safe fallbacks) -------------------------------------------
 local DEFAULT_BASE_URL      = "https://server.eduquest.vip"
---local DEFAULT_BASE_URL      = "http://localhost:8888"
 local ENDPOINT_ACTIVE_SETS  = "/api/questionset/get/active"
 local ENDPOINT_SAVE_QUESTION= "/api/question/save"
 local CACHE_DURATION_SEC    = 35 * 60   -- 35 minutes
