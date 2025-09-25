@@ -6,6 +6,16 @@ local M = {}
 -- question format expected:
 -- q = { text="...", answers = { {label="...", correct=true/false}, ... } }
 
+-- ----- THEME (dark) ---------------------------------------------------------
+local DARK_BG       = "#121212"   -- whole formspec background
+local PANEL_BG      = "#1e1e1e"   -- card/panel behind content
+local TEXT_LIGHT    = "#f5f5f5"   -- default text
+local TEXT_MUTED    = "#c7c7c7"   -- secondary text (optional)
+local OK_COLOR      = "#14a03d"   -- success
+local ERROR_COLOR   = "#c32323"   -- error
+local BTN_BG        = "#2a2a2a"
+local BTN_BORDER    = "#444444"
+
 local FONT_ALIAS
 local FONT_STYLE_ATTR = ""
 local FONT_FORMSPEC_PREFIX = ""
@@ -101,14 +111,15 @@ end
 
 local function hx(s, color)
   s = minetest.formspec_escape(s or "")
+  local want_color = color or TEXT_LIGHT
 
-  if FONT_STYLE_ATTR ~= "" or color then
+  if FONT_STYLE_ATTR ~= "" or want_color then
     local attrs = {}
     if FONT_STYLE_ATTR ~= "" then
       attrs[#attrs + 1] = FONT_STYLE_ATTR
     end
-    if color then
-      attrs[#attrs + 1] = "color=" .. color
+    if want_color then
+      attrs[#attrs + 1] = "color=" .. want_color
     end
     return ("<style %s>%s</style>"):format(table.concat(attrs, " "), s)
   end
@@ -142,46 +153,65 @@ end
 function M.build_formspec(q, st)
   local rows = { "formspec_version[6]size[8,7]" }
 
+  -- 1) Dark window background (second arg 'true' = fill entire window)
+  rows[#rows+1] = ("bgcolor[%s;true]"):format(DARK_BG)
+
+  -- 2) Global styles: light text for labels/hypertext, dark buttons
+  -- (Keep your font styles; we add textcolor/bg/border here.)
   if FONT_FORMSPEC_PREFIX ~= "" then
     rows[#rows+1] = FONT_FORMSPEC_PREFIX
   end
+  rows[#rows+1] = ("style_type[label;textcolor=%s]"):format(TEXT_LIGHT)
+  rows[#rows+1] = ("style_type[hypertext;textcolor=%s]"):format(TEXT_LIGHT)
+  rows[#rows+1] =
+    ("style_type[button;textcolor=%s;bgcolor=%s;border=true;bordercolor=%s]"):
+      format(TEXT_LIGHT, BTN_BG, BTN_BORDER)
+
+  -- 3) Panel behind content (drawn first; later items appear on top)
+  rows[#rows+1] = ("box[0.3,0.4;7.4,5.4;%s]"):format(PANEL_BG)
 
   -- Question text (bold, hypertext so we can style consistently)
   rows[#rows+1] = ("hypertext[0.5,0.6;7,1;question;<b>%s</b>]"):format(
     hx(q.text or "")
   )
 
-  -- Current choice line (colored green after submit if it's the correct one)
+  -- Current choice line (green if correct after submit)
   local a = (q.answers or {})[st.a_idx or 1]
   local show = a and a.label or "—"
   local correct_idx = find_correct_index(q)
   local is_correct_choice = (st.reveal and correct_idx and st.a_idx == correct_idx)
-  local ans_markup = hx((show or ""), is_correct_choice and "#14a03d" or nil)
+  local ans_markup = hx((show or ""), is_correct_choice and OK_COLOR or TEXT_LIGHT)
   rows[#rows+1] = ("hypertext[0.5,2.0;7,2;answer;%s]"):format(ans_markup)
 
   -- Feedback line
   local feedback = ""
   if st.checked then
     local is_correct = a and a.correct
-    feedback = hx(is_correct and "Correct!" or "Try again!", is_correct and "#14a03d" or "#c32323")
+    feedback = hx(is_correct and "Correct!" or "Try again!", is_correct and OK_COLOR or ERROR_COLOR)
   end
   rows[#rows+1] = ("hypertext[0.5,3.5;7,0.9;feedback;%s]"):format(feedback)
 
-  -- Controls: Prev always; Submit before check; Next after check; Skip always
-  rows[#rows+1] = "button[0.5,4.6;2,0.9;prev;ABC]"
+  -- Optional: per-button fine-tuning (if you want distinct accents)
+  rows[#rows+1] = "style[submit;bgcolor=#2b3d2c;bordercolor=#355a36]"  -- a subtle green-ish
+  rows[#rows+1] = "style[next;bgcolor=#2a2a2a;bordercolor=#444444]"
+  rows[#rows+1] = "style[prev;bgcolor=#2a2a2a;bordercolor=#444444]"
+
+  -- Controls: Prev / Submit / Next (keep layout)
+  rows[#rows+1] = "button[0.5,4.6;2,0.9;prev;Prev]"
   if not st.checked then
     rows[#rows+1] = "button[3,4.6;2,0.9;submit;Submit]"
   else
-    rows[#rows+1] = "button[3,4.6;2,0.9;dummy; ]" -- spacer so layout stays aligned
+    rows[#rows+1] = "button[3,4.6;2,0.9;dummy; ]"
   end
   if st.checked then
     rows[#rows+1] = "button[5.5,4.6;2,0.9;next;Next]"
   else
-    rows[#rows+1] = "button[5.5,4.6;2,0.9;dummy2; ]"
+    --rows[#rows+1] = "button[5.5,4.6;2,0.9;dummy2; ]"
   end
-  --rows[#rows+1] = "button_exit[2.5,5.8;3,0.9;skip;Skip]"
+
   return table.concat(rows)
 end
+
 
 function M.show_question(player, player_state, questions, formname, forms)
   local name = player:get_player_name()
