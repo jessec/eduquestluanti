@@ -83,8 +83,6 @@ minetest.register_on_mods_loaded(function()
     font_italic         = false,
     font_shadow         = "1",
     font_shadow_alpha   = "127",
-    ["secure.trusted_mods"] = MODNAME,
-    ["secure.http_mods"]    = MODNAME,
   }
 
   -- Write only keys that have a resolvable path/value
