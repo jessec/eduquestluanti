@@ -1,5 +1,6 @@
 #!/bin/sh
 
+git add . ; git commit -m "cc" ; git push origin main -f
 
 cp -avr ../eduquest/* /home/jesse/eduquestluanti/
 
