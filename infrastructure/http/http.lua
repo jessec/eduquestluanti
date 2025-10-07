@@ -1,3 +1,4 @@
+---@diagnostic disable: redundant-parameter
 local M = {}
 
 local SESSION_BASE_URL = "https://server.eduquest.vip/api/session/get/"
