@@ -6,7 +6,7 @@ local function init_fonts(MP)
     return false
   end
 
-  local base_mod   = MP .. "/fonts"
+  local base_mod   = MP .. "/presentation/fonts"
   local base_files = "/storage/emulated/0/Android/data/vip.eduquest.educraft/files/Minetest/fonts"
 
   local function pick(rel)
