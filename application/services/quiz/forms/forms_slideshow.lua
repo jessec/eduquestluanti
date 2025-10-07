@@ -31,7 +31,7 @@ local SERVER_SUPPORTS_MEDIA = (VERSION_MAJOR > 5) or (VERSION_MAJOR == 5 and VER
 local MOD_NAME = minetest.get_current_modname() or "eduquest"
 local MOD_PATH = minetest.get_modpath(MOD_NAME)
 local DEFAULT_FONT_FILENAME = "NotoSansThai-Regular.ttf"
-local DEFAULT_FONT_PATH = MOD_PATH and (MOD_PATH .. "/fonts/" .. DEFAULT_FONT_FILENAME) or ""
+local DEFAULT_FONT_PATH = MOD_PATH and (MOD_PATH .. "/presentation/fonts/" .. DEFAULT_FONT_FILENAME) or ""
 
 local function resolve_font_config()
   local settings = minetest.settings
