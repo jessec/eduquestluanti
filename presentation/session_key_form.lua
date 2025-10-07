@@ -13,7 +13,7 @@ end
 local function build_formspec()
   local parts = {
     "formspec_version[6]size[7,3.4]",
-    "label[0.4,0.5;" .. minetest.formspec_escape("Paste your Eduquest session key") .. "]",
+    "label[0.4,0.5;" .. minetest.formspec_escape("Paste your Eduquest key") .. "]",
     "field[0.4,1.3;6.2,0.8;session_key;;]",
     "button[0.8,2.2;2.2,0.8;cancel;Cancel]",
     "button[3.6,2.2;2.2,0.8;save;Save]",
