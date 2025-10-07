@@ -34,6 +34,8 @@ local UserService   = dofile(MP .. "/application/services/user/user_service.lua"
 local CourseService = dofile(MP .. "/application/services/quiz/course_service.lua")
 local quiz_service  = dofile(MP .. "/application/services/quiz/quiz_service.lua")
 
+container:register("quiz_service", function() return quiz_service end)
+
 container:register("user_service", function(c)
   return UserService.new({
     repo   = c:resolve("repo"),
@@ -51,7 +53,6 @@ container:register("course_service", function(c)
   })
 end)
 
-container:register("quiz_service", function() return quiz_service end)
 
 -- --- Feature initialization -------------------------------------------------
 local quiz = container:resolve("quiz_service")
