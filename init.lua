@@ -58,69 +58,12 @@ quiz.register(container, {
 })
 
 
-minetest.register_chatcommand("showhud", {
-    description = "Show a test HUD layer",
-    func = function(name)
-        local player = minetest.get_player_by_name(name)
-        if not player then
-            return false, "Player not found."
-        end
 
-        local hud = container:resolve("hud_layer")
-        hud.show(player, "Welcome to EduQuest!")
-        return true, "HUD displayed."
-    end
-})
+local showhud_command = dofile(MP .. "/presentation/commands/show_hud_command.lua")
+showhud_command.register(container)
 
 
+local font_config = dofile(MP .. "/infrastructure/config/font_config.lua")
 minetest.register_on_mods_loaded(function()
-  local function exists(p)
-    local f = io.open(p, "rb"); if f then f:close(); return true end; return false
-  end
-  -- Prefer fonts shipped with the mod; fall back to app-scoped fonts if you keep using them
-  local base_mod   = MP.."/fonts"
-  local base_files = "/storage/emulated/0/Android/data/vip.eduquest.educraft/files/Minetest/fonts"
-
-  local pick = function(rel)
-    local a = base_mod.."/"..rel
-    if exists(a) then return a end
-    local b = base_files.."/"..rel
-    if exists(b) then return b end
-    return nil
-  end
-
-  local cfg = {
-    font_path           = pick("NotoSansThai-Regular.ttf"),
-    font_path_bold      = pick("NotoSansThai-Bold.ttf"),
-    --mono_font_path      = pick("Cousine-Regular.ttf"),
-    --mono_font_path_bold = pick("Cousine-Bold.ttf"),
-    --fallback_font_path  = pick("DroidSansFallbackFull.ttf"),
-    font_size           = "18",
-    mono_font_size      = "18",
-    font_bold           = false,
-    font_italic         = false,
-    font_shadow         = "1",
-    font_shadow_alpha   = "127",
-  }
-
-  -- Write only keys that have a resolvable path/value
-  for k,v in pairs(cfg) do
-    if v ~= nil then
-      if type(v) == "boolean" then
-        minetest.settings:set_bool(k, v)
-      else
-        minetest.settings:set(k, v)
-      end
-    else
-      minetest.log("warning", "[fonts] Missing asset for "..k.." (not set)")
-    end
-  end
-
-  minetest.settings:write()
-
-  for k,_ in pairs(cfg) do
-    minetest.log("action", ("[fonts] %s = %s"):format(k, tostring(minetest.settings:get(k))))
-  end
-  minetest.chat_send_all("[eduquest] Font settings saved. Restart the game to apply.")
+  font_config.init_fonts(MP)
 end)
-
