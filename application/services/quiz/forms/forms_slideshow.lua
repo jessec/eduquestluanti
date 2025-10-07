@@ -1,3 +1,4 @@
+---@diagnostic disable: need-check-nil
 -- app/forms_slideshow.lua
 local M = {}
 

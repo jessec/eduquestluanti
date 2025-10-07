@@ -1,3 +1,4 @@
+---@diagnostic disable: need-check-nil, assign-type-mismatch, redundant-parameter
 local M = {}
 
 --- Register the quiz callbacks and wire HTTP integration.

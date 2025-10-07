@@ -1,3 +1,4 @@
+---@diagnostic disable: redundant-parameter
 -- course_service.lua
 -- A Lua port of UserCoursesService.java for Luanti/Minetest.
 -- Caches active question sets, refreshes periodically, and can pick a random unseen MC question.
