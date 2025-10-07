@@ -17,8 +17,8 @@ local UserService       = dofile(MP .. "/application/services/user/user_service.
 local http_impl         = dofile(MP .. "/infrastructure/http/http.lua")
 local settings_impl     = dofile(MP .. "/infrastructure/settings/settings.lua")
 local DI                = dofile(MP .. "/infrastructure/di/di.lua")
-local session_key_ui    = dofile(MP .. "/presentation/session_key_form.lua")
-local hud_layer        = dofile(MP .. "/presentation/hud_layer.lua")
+local session_key_ui    = dofile(MP .. "/presentation/form/session_key_form.lua")
+local hud_layer        = dofile(MP .. "/presentation/hud/hud_layer.lua")
 local http_api_impl     = minetest.request_http_api()   -- may be nil if not whitelisted
 local settings_api_impl = minetest.settings
 
