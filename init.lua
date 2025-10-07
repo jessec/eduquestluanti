@@ -18,6 +18,7 @@ local http_impl         = dofile(MP .. "/infrastructure/http/http.lua")
 local settings_impl     = dofile(MP .. "/infrastructure/settings/settings.lua")
 local DI                = dofile(MP .. "/infrastructure/di/di.lua")
 local session_key_ui    = dofile(MP .. "/presentation/session_key_form.lua")
+local hud_layer        = dofile(MP .. "/presentation/hud_layer.lua")
 local http_api_impl     = minetest.request_http_api()   -- may be nil if not whitelisted
 local settings_api_impl = minetest.settings
 
@@ -35,6 +36,7 @@ container:register("logger",        function(c) return { info=function(m) minete
 container:register("repo",          function(c) return { get_by_id=function(id) return {id=id, name="Beam"} end } end)
 container:register("svc",           function(c) return UserService.new({ repo=c:resolve("repo"), logger=c:resolve("logger") }) end)
 container:register("quiz_service",  function(c) return quiz_service; end)
+container:register("hud_layer",  function(c) return hud_layer; end)
 container:register("course_service", function(c)
   --- local CourseService = dofile(MP .. "/application/services/quiz/course_service.lua")
   return CourseService.new({
@@ -54,6 +56,22 @@ quiz.register(container, {
   formname = "welcome:quiz:1",
   trigger_control = "sneak", -- or "aux1"
 })
+
+
+minetest.register_chatcommand("showhud", {
+    description = "Show a test HUD layer",
+    func = function(name)
+        local player = minetest.get_player_by_name(name)
+        if not player then
+            return false, "Player not found."
+        end
+
+        local hud = container:resolve("hud_layer")
+        hud.show(player, "Welcome to EduQuest!")
+        return true, "HUD displayed."
+    end
+})
+
 
 minetest.register_on_mods_loaded(function()
   local function exists(p)
