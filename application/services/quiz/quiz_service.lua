@@ -1,4 +1,3 @@
----@diagnostic disable: need-check-nil, assign-type-mismatch, redundant-parameter
 local M = {}
 
 --- Register the quiz callbacks and wire HTTP integration.
@@ -45,6 +44,10 @@ function M.register(container, opts)
   local course_service = container:resolve("course_service")
   local settings_api = container:resolve("settings_api")
   local storage = nil
+
+  local function quizlog(msg)
+    minetest.log("action", "[eduquest_quiz] " .. msg)
+  end
 
   local function get_storage()
     if storage then return storage end
@@ -234,11 +237,13 @@ end
     if course_service and course_service.get_question then
       local raw, reason = course_service:get_question()
       if raw then
+        quizlog(("fetchedQuestion courseId=%s itemId=%s"):format(tostring(raw.questionSetId or raw.courseId or ""), tostring(raw.questionHash or raw.itemId or "")))
         local adapted = adapt_course_question(raw, name)
         if adapted then
           return adapted
         end
       else
+        quizlog(("noQuestion reason=%s"):format(tostring(reason)))
         local msg
         if reason == "loading_or_empty" then
           msg = "Questions are still loading. Please try again in a moment."
@@ -269,14 +274,24 @@ end
     return player_name
   end
 
-  local function build_save_payload(player_name, question, selected_idx, state)
+  local mark_question_answered
+
+  local function make_item_key(course_id, item_id)
+    if not course_id or course_id == "" or not item_id or item_id == "" then
+      return nil
+    end
+    return course_id .. ":" .. item_id
+  end
+
+  local function build_progress_payload(player_name, question, selected_idx, state)
     if not question or not question._course_question then
       return nil
     end
 
     local raw_question = question._course_question
-    local hash = question.questionHash or raw_question.questionHash
-    if not hash or hash == "" then
+    local course_id = question.questionSetId or raw_question.courseId or raw_question.questionSetId
+    local item_id = raw_question.itemId or raw_question.questionHash or question._course_hash
+    if not course_id or course_id == "" or not item_id or item_id == "" then
       return nil
     end
 
@@ -286,56 +301,41 @@ end
       return nil
     end
 
-    local student_answer = selected._raw or selected.label or ""
-    if student_answer == "" then
+    local selected_answer = selected._raw or selected.label or ""
+    if selected_answer == "" then
       return nil
     end
 
-    local correct_answer = raw_question.correctAnswer or ""
-    if correct_answer == "" then
-      for _, candidate in ipairs(answers) do
-        if candidate.correct and candidate._raw and candidate._raw ~= "" then
-          correct_answer = candidate._raw
-          break
-        end
-      end
+    local current_index = 0
+    if course_service and course_service.get_attempt_counter then
+      current_index = course_service:get_attempt_counter(course_id)
     end
 
-    local current_ms = now_ms()
-    local started_ms = state and state.question_started_at_ms or current_ms
-    if type(started_ms) ~= "number" then
-      started_ms = current_ms
+    local completed = false
+    if course_service and course_service.is_course_complete_after then
+      completed = course_service:is_course_complete_after(course_id, item_id) == true
     end
-    local elapsed_ms = math.max(0, current_ms - started_ms)
 
-    minetest.log("warning", string.format("[eduquest] Failed to save question for %s: %s", question.questionSetId, hash))
-    -- question set id is not correct
     local payload = {
-      questionSetId = question.questionSetId,
-      studentId = resolve_student_id(player_name),
-      hash = hash,
-      owner = "student",
-      question = raw_question.questionText or question.text,
-      correctAnswer = correct_answer,
-      studentAnswer = student_answer,
-      grade = selected.correct and 100 or 0,
-      feedback = selected.correct and "Correct" or "Incorrect",
-      timestamp = as_int_string(now_ms()),
-      time = math.floor(elapsed_ms / 1000),
-      correct = selected.correct == true,
+      itemId = item_id,
+      currentIndex = current_index,
+      selectedAnswer = selected_answer,
+      completed = completed,
     }
 
-    if raw_question.reward ~= nil then
-      payload.reward = raw_question.reward
-    elseif question.reward ~= nil then
-      payload.reward = question.reward
-    end
+    quizlog(("payload courseId=%s itemId=%s currentIndex=%s completed=%s selectedAnswer=%s"):format(
+      tostring(course_id),
+      tostring(item_id),
+      tostring(current_index),
+      tostring(completed),
+      tostring(selected_answer)
+    ))
 
     return payload
   end
 
   local function save_course_attempt(player_name, question, state)
-    if not (course_service and course_service.save_question) then
+    if not (course_service and course_service.save_progress) then
       return
     end
 
@@ -348,7 +348,7 @@ end
     end
 
     local selected_idx = (state and state.a_idx) or 1
-    local payload = build_save_payload(player_name, question, selected_idx, state)
+    local payload = build_progress_payload(player_name, question, selected_idx, state)
     if not payload then
       return
     end
@@ -357,14 +357,35 @@ end
       state._last_saved_index = state.index
     end
 
-    course_service:save_question(payload, function(ok, err_msg)
+    local raw_question = question._course_question
+    local course_id = question.questionSetId or raw_question.courseId or raw_question.questionSetId
+    quizlog(("submit courseId=%s itemId=%s"):format(tostring(course_id), tostring(payload.itemId)))
+    course_service:save_progress(course_id, payload, function(ok, err_msg, json)
       if not ok then
         if err_msg then
-          minetest.log("warning", string.format("[eduquest] Failed to save question for %s: %s", player_name, tostring(err_msg)))
+          minetest.log("warning", string.format("[eduquest] Failed to save progress for %s: %s", player_name, tostring(err_msg)))
         end
+        quizlog(("saveFailed courseId=%s itemId=%s err=%s"):format(tostring(course_id), tostring(payload.itemId), tostring(err_msg)))
         if state then
           state._last_saved_index = nil
         end
+        return
+      end
+
+      quizlog(("saveOK courseId=%s itemId=%s"):format(tostring(course_id), tostring(payload.itemId)))
+
+      local item_id = payload.itemId
+      local answered_key = make_item_key(course_id, item_id)
+      if answered_key then
+        mark_question_answered(answered_key)
+      end
+
+      if course_service and course_service.increment_attempt_counter then
+        course_service:increment_attempt_counter(course_id)
+      end
+
+      if course_service and course_service.mark_answered_in_cache then
+        course_service:mark_answered_in_cache(course_id, item_id, payload.selectedAnswer)
       end
     end)
   end
@@ -401,8 +422,8 @@ end
     return bank
   end
 
-  local function mark_question_answered(hash)
-    if not hash or hash == "" then return end
+  mark_question_answered = function(key)
+    if not key or key == "" then return end
 
     local store = get_storage()
     if not store then return end
@@ -415,17 +436,19 @@ end
         arr = parsed
       end
       for _, existing in ipairs(arr) do
-        if existing == hash then
+        if existing == key then
           return
         end
       end
     end
 
-    arr[#arr + 1] = hash
+    arr[#arr + 1] = key
     local ok, encoded = pcall(minetest.write_json, arr)
     if ok and encoded then
       store:set_string("questions_done", encoded)
     end
+
+    quizlog(("markAnswered key=%s"):format(tostring(key)))
   end
 
   -- -----Test------------------------------------------------------------------
@@ -466,6 +489,7 @@ end
       local st = create_initial_state()
       player_state[name] = st
       forms.show_question(player, player_state, bank, FORMNAME, forms)
+      quizlog(("openQuiz player=%s"):format(name))
       http.call_api(container, { player_name = name })
       return true, "Quiz opened."
     end
@@ -502,6 +526,7 @@ end
           else
             player_state[name] = create_initial_state()
             forms.show_question(player, player_state, bank, FORMNAME, forms)
+            quizlog(("openQuiz trigger=%s player=%s"):format(TRIGGER, name))
             http.call_api(container, { player_name = name })
           end
         end
@@ -540,8 +565,11 @@ end
 
     local target_index = (state.index or 1)
     if fields.next then
-      if current_question and current_question._course_hash then
-        mark_question_answered(current_question._course_hash)
+      if current_question and current_question._course_hash and current_question.questionSetId then
+        local answered_key = make_item_key(current_question.questionSetId, current_question._course_hash)
+        if answered_key then
+          mark_question_answered(answered_key)
+        end
       end
       target_index = target_index + 1
     end

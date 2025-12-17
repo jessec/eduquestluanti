@@ -1,7 +1,7 @@
 -- defaults.lua (immutable)
 local _defaults = {
   base_url = "https://server.eduquest.vip",
-  endpoint = "/student/credit/get",
+  endpoint = "/api/student/credit/get",
   timeout  = 10,
 }
 

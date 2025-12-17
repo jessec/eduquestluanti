@@ -1,4 +1,3 @@
----@diagnostic disable: redundant-parameter
 local M = {}
 
 local SESSION_BASE_URL = "https://server.eduquest.vip/api/session/get/"
@@ -182,7 +181,7 @@ function M.resolve_token(container, opts, callback)
 
     local player_name = opts.player_name
     if player_name then
-        local session_ui = container:resolve("key_ui")
+        local session_ui = container:resolve("session_key_ui")
         if session_ui and session_ui.request_key then
             session_ui.request_key(container, player_name, {
                 on_success = function(saved_key)
