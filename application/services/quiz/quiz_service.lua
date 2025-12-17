@@ -7,6 +7,7 @@ function M.register(container, opts)
   opts = opts or {}
   local FORMNAME = opts.formname or "welcome:quiz"
   local TRIGGER  = (opts.trigger_control == "aux1") and "aux1" or "sneak" -- default: Shift
+  local STATUS_FORMNAME = "eduquest:quiz_status"
 
   local fallback_questions = opts.questions or {
     {
@@ -38,11 +39,13 @@ function M.register(container, opts)
   local player_state     = {}  -- per-player quiz state (slideshow module also uses this)
   local player_questions = {}  -- per-player dynamic question banks
   local last_ctrl        = {}  -- per-player last control snapshot for rising-edge detection
+  local status_state     = {}  -- per-player status formspec state
 
   local http   = container:resolve("http")
   local forms  = container:resolve("forms")
   local course_service = container:resolve("course_service")
   local settings_api = container:resolve("settings_api")
+  local http_api = container:resolve("http_api")
   local storage = nil
 
   local function quizlog(msg)
@@ -146,6 +149,105 @@ local function as_int_string(n)
   return string.format("%d", math.floor(tonumber(n) or 0))
 end
 
+  local function build_quiz_status_formspec(title, message_lines, opts2)
+    opts2 = opts2 or {}
+
+    local title_text = minetest.formspec_escape(title or "EduQuest Quiz")
+    local msg = minetest.formspec_escape(table.concat(message_lines or {}, "\n"))
+
+    local parts = {
+      "formspec_version[6]size[9,4.6]",
+      "bgcolor[#121212;true]",
+      "style_type[label;textcolor=#f5f5f5]",
+      "style_type[textarea;textcolor=#f5f5f5]",
+      "style_type[button;textcolor=#f5f5f5;bgcolor=#2a2a2a;border=true;bordercolor=#444444]",
+      ("label[0.4,0.4;%s]"):format(title_text),
+      ("textarea[0.4,0.9;8.2,2.9;msg;;%s]"):format(msg),
+      "button[5.6,3.95;3,0.8;retry;Retry]",
+      "button_exit[0.4,3.95;3,0.8;close;Close]",
+    }
+
+    if opts2.hide_retry then
+      parts[#parts] = nil
+      parts[#parts] = nil
+      parts[#parts + 1] = "button_exit[3.2,3.95;3,0.8;close;OK]"
+    end
+
+    return table.concat(parts, "")
+  end
+
+  local function build_health_lines(reason)
+    local lines = {}
+
+    local secure_http_mods = settings_api and settings_api:get("secure.http_mods") or ""
+    if not http_api then
+      lines[#lines + 1] = "HTTP is disabled."
+      lines[#lines + 1] = "Fix: set secure.http_mods = eduquest and restart."
+    else
+      lines[#lines + 1] = "HTTP is enabled."
+      lines[#lines + 1] = ("secure.http_mods = %s"):format(secure_http_mods ~= "" and secure_http_mods or "<unset>")
+    end
+
+    local base_url = settings_api and settings_api:get("eduquest_base_url") or ""
+    lines[#lines + 1] = ("Base URL: %s"):format(base_url ~= "" and base_url or "(default) https://server.eduquest.vip")
+    if base_url:match("^http://127%.0%.0%.1") then
+      lines[#lines + 1] = "Android emulator tip: use http://10.0.2.2:<port> for host localhost."
+    end
+
+    local token = settings_api and settings_api:get("eduquest_token") or ""
+    local session_key = settings_api and settings_api:get("eduquest_session_key") or ""
+    if token ~= "" then
+      lines[#lines + 1] = "Auth: eduquest_token is set."
+    elseif session_key ~= "" then
+      lines[#lines + 1] = "Auth: eduquest_session_key is set."
+    else
+      lines[#lines + 1] = "Auth missing: set eduquest_token or eduquest_session_key."
+    end
+
+    if reason == "no_unseen_mc" then
+      lines[#lines + 1] = "No playable unanswered questions were found."
+      lines[#lines + 1] = "You may have completed them already, or the question data is invalid."
+    elseif reason == "invalid_question" then
+      lines[#lines + 1] = "Questions were received but are not playable (answers/correctAnswer mismatch)."
+    end
+
+    return lines
+  end
+
+  local function show_status(player_name, mode, reason)
+    status_state[player_name] = {
+      mode = mode,
+      reason = reason,
+      shown_at_ms = now_ms(),
+    }
+
+    local title
+    local lines = {}
+
+    if mode == "wait" then
+      title = "Loading EduQuest questions…"
+      lines[#lines + 1] = "Please wait a moment and try again."
+      lines[#lines + 1] = ""
+      for _, l in ipairs(build_health_lines(reason)) do lines[#lines + 1] = l end
+      minetest.show_formspec(player_name, STATUS_FORMNAME, build_quiz_status_formspec(title, lines))
+
+      local opened_at = status_state[player_name].shown_at_ms
+      minetest.after(4, function()
+        local st = status_state[player_name]
+        if st and st.shown_at_ms == opened_at and st.mode == "wait" then
+          minetest.close_formspec(player_name, STATUS_FORMNAME)
+        end
+      end)
+      return
+    end
+
+    title = "EduQuest quiz not available"
+    lines[#lines + 1] = "No EduQuest questions are available right now."
+    lines[#lines + 1] = ""
+    for _, l in ipairs(build_health_lines(reason)) do lines[#lines + 1] = l end
+    minetest.show_formspec(player_name, STATUS_FORMNAME, build_quiz_status_formspec(title, lines))
+  end
+
   local function trim_lower(s)
     if type(s) ~= "string" then return "" end
     return s:gsub("^%s+", ""):gsub("%s+$", ""):lower()
@@ -242,26 +344,21 @@ end
         if adapted then
           return adapted
         end
+        show_status(name, "setup", "invalid_question")
+        return nil, "invalid_question"
       else
         quizlog(("noQuestion reason=%s"):format(tostring(reason)))
-        local msg
-        if reason == "loading_or_empty" then
-          msg = "Questions are still loading. Please try again in a moment."
-        elseif reason == "no_unseen_mc" then
-          msg = "You've answered all available questions for now."
-        elseif reason == "invalid_question" then
-          msg = "This question couldn't be loaded; trying a fallback."
-        elseif reason == "storage_unavailable" then
-          ---msg = "Unable to access quiz storage yet; using fallback questions."
-          msg = "Questions are still loading. Please try again in a moment."
+        if reason == "loading_or_empty" or reason == "storage_unavailable" then
+          show_status(name, "wait", reason)
+          return nil, reason
         end
-        if msg then
-          --minetest.chat_send_player(name, msg)
-        end
+        show_status(name, "setup", reason or "no_unseen_mc")
+        return nil, reason or "no_unseen_mc"
       end
     end
 
-    return clone_fallback_question()
+    show_status(name, "setup", "no_course_service")
+    return nil, "no_course_service"
   end
 
   local function resolve_student_id(player_name)
@@ -412,9 +509,9 @@ end
 
     local target_index = (opts and opts.target_index) or 1
     while #bank < target_index do
-      local q = fetch_question_for_player(name)
+      local q, reason = fetch_question_for_player(name)
       if not q then
-        return nil
+        return nil, reason
       end
       bank[#bank + 1] = q
     end
@@ -483,7 +580,7 @@ end
 
       local bank = ensure_question_bank(name)
       if not bank or #bank == 0 then
-        return false, "No quiz questions are available right now."
+        return false, "EduQuest quiz not available right now."
       end
       -- (Re)start slideshow state fresh
       local st = create_initial_state()
@@ -522,7 +619,7 @@ end
         if not st or not st._active then
           local bank = ensure_question_bank(name)
           if not bank or #bank == 0 then
-            minetest.chat_send_player(name, "No quiz questions are available right now.")
+            -- A status formspec is shown by fetch_question_for_player.
           else
             player_state[name] = create_initial_state()
             forms.show_question(player, player_state, bank, FORMNAME, forms)
@@ -530,6 +627,35 @@ end
             http.call_api(container, { player_name = name })
           end
         end
+      end
+    end
+  end)
+
+  minetest.register_on_player_receive_fields(function(player, formname, fields)
+    if formname ~= STATUS_FORMNAME then return end
+    if not player then return end
+
+    local name = player:get_player_name()
+    if fields.quit or fields.close then
+      status_state[name] = nil
+      return
+    end
+
+    if fields.retry then
+      if course_service and course_service.clear_cache then
+        course_service:clear_cache()
+        if course_service.get_user_courses then
+          course_service:get_user_courses()
+        end
+      end
+
+      local bank = ensure_question_bank(name)
+      local player_obj = minetest.get_player_by_name(name)
+      if player_obj and bank and #bank > 0 then
+        player_state[name] = create_initial_state()
+        minetest.close_formspec(name, STATUS_FORMNAME)
+        forms.show_question(player_obj, player_state, bank, FORMNAME, forms)
+        quizlog(("openQuiz retry player=%s"):format(name))
       end
     end
   end)

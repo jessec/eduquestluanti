@@ -734,15 +734,20 @@ function CourseService:_refresh_async()
       return
     end
 
+
+    --- local url = "http://10.0.2.2:8888/api/v2/questions/active"
+    local url  = self._cfg.urls.active_questions
+
     self:clear_cache()
     log(self, "🔄 Fetching active questions...")
-    quizlog(("GET activeQuestions url=%s"):format(self._cfg.urls.active_questions))
+    quizlog(("GET activeQuestions url=%s"):format(url))
     local headers = {
       "Accept: application/json",
       "Authorization: Bearer " .. token
     }
 
-    get_json_with_retry(self, self._cfg.urls.active_questions, headers, function(json, e)
+
+    get_json_with_retry(self, url, headers, function(json, e)
       if not json then
         err("Fetch failed: "..tostring(e))
         quizlog(("activeQuestionsError err=%s"):format(tostring(e)))

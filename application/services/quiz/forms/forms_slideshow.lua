@@ -197,7 +197,7 @@ function M.build_formspec(q, st)
   rows[#rows+1] = "style[prev;bgcolor=#2a2a2a;bordercolor=#444444]"
 
   -- Controls: Prev / Submit / Next (keep layout)
-  rows[#rows+1] = "button[0.5,4.6;2,0.9;prev;Prev]"
+  rows[#rows+1] = "button[0.5,4.6;2,0.9;prev;ABC]"
   if not st.checked then
     rows[#rows+1] = "button[3,4.6;2,0.9;submit;Submit]"
   else
