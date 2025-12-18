@@ -46,6 +46,7 @@ function M.register(container, opts)
   local course_service = container:resolve("course_service")
   local settings_api = container:resolve("settings_api")
   local http_api = container:resolve("http_api")
+  local session_key_ui = container:resolve("session_key_ui")
   local storage = nil
 
   local function quizlog(msg)
@@ -201,7 +202,11 @@ end
     elseif session_key ~= "" then
       lines[#lines + 1] = "Auth: eduquest_session_key is set."
     else
-      lines[#lines + 1] = "Auth missing: set eduquest_token or eduquest_session_key."
+      if reason == "auth_missing" then
+        lines[#lines + 1] = "Sign-in required: please enter your EduQuest session key."
+      else
+        lines[#lines + 1] = "Auth missing: set eduquest_token or eduquest_session_key."
+      end
     end
 
     if reason == "no_unseen_mc" then
@@ -214,7 +219,50 @@ end
     return lines
   end
 
-  local function show_status(player_name, mode, reason)
+  local function auth_is_configured()
+    local token = settings_api and settings_api:get("eduquest_token") or ""
+    local session_key = settings_api and settings_api:get("eduquest_session_key") or ""
+    return token ~= "" or session_key ~= ""
+  end
+
+  local auth_prompt_open = {}
+  local try_open_quiz
+  local show_status
+
+  local function prompt_for_session_key(player_name, source)
+    if auth_prompt_open[player_name] then
+      return
+    end
+    auth_prompt_open[player_name] = true
+
+    if not session_key_ui or not session_key_ui.request_key then
+      auth_prompt_open[player_name] = nil
+      show_status(player_name, "setup", "auth_missing")
+      return
+    end
+
+    quizlog(("requestSessionKey source=%s player=%s"):format(tostring(source or "unknown"), player_name))
+    session_key_ui.request_key(container, player_name, {
+      on_success = function()
+        auth_prompt_open[player_name] = nil
+        if course_service and course_service.clear_cache then
+          course_service:clear_cache()
+        end
+        if course_service and course_service.get_user_courses then
+          course_service:get_user_courses()
+        end
+        minetest.after(0, function()
+          try_open_quiz(player_name, "session_key_saved")
+        end)
+      end,
+      on_cancel = function()
+        auth_prompt_open[player_name] = nil
+        show_status(player_name, "setup", "auth_missing")
+      end,
+    })
+  end
+
+  show_status = function(player_name, mode, reason)
     status_state[player_name] = {
       mode = mode,
       reason = reason,
@@ -336,6 +384,11 @@ end
   end
 
   local function fetch_question_for_player(name)
+    if not auth_is_configured() then
+      prompt_for_session_key(name, "fetch_question")
+      return nil, "auth_missing"
+    end
+
     if course_service and course_service.get_question then
       local raw, reason = course_service:get_question()
       if raw then
@@ -519,6 +572,30 @@ end
     return bank
   end
 
+  try_open_quiz = function(name, source)
+    if not auth_is_configured() then
+      prompt_for_session_key(name, source)
+      return false
+    end
+
+    local player = minetest.get_player_by_name(name)
+    if not player then
+      return false
+    end
+
+    local bank = ensure_question_bank(name)
+    if not bank or #bank == 0 then
+      return false
+    end
+
+    player_state[name] = create_initial_state()
+    minetest.close_formspec(name, STATUS_FORMNAME)
+    forms.show_question(player, player_state, bank, FORMNAME, forms)
+    quizlog(("openQuiz source=%s player=%s"):format(tostring(source or "unknown"), name))
+    http.call_api(container, { player_name = name })
+    return true
+  end
+
   mark_question_answered = function(key)
     if not key or key == "" then return end
 
@@ -575,20 +652,13 @@ end
   minetest.register_chatcommand("quiz", {
     description = "Open the welcome quiz",
     func = function(name)
-      local player = minetest.get_player_by_name(name)
-      if not player then return false, "Player not found." end
-
-      local bank = ensure_question_bank(name)
-      if not bank or #bank == 0 then
-        return false, "EduQuest quiz not available right now."
+      if try_open_quiz(name, "chatcommand") then
+        return true, "Quiz opened."
       end
-      -- (Re)start slideshow state fresh
-      local st = create_initial_state()
-      player_state[name] = st
-      forms.show_question(player, player_state, bank, FORMNAME, forms)
-      quizlog(("openQuiz player=%s"):format(name))
-      http.call_api(container, { player_name = name })
-      return true, "Quiz opened."
+      if not auth_is_configured() then
+        return true, "Enter your session key to start."
+      end
+      return false, "EduQuest quiz not available right now."
     end
   })
 
@@ -617,15 +687,7 @@ end
         -- if there is an active formspec with our formname, don't reopen
         local st = player_state[name]
         if not st or not st._active then
-          local bank = ensure_question_bank(name)
-          if not bank or #bank == 0 then
-            -- A status formspec is shown by fetch_question_for_player.
-          else
-            player_state[name] = create_initial_state()
-            forms.show_question(player, player_state, bank, FORMNAME, forms)
-            quizlog(("openQuiz trigger=%s player=%s"):format(TRIGGER, name))
-            http.call_api(container, { player_name = name })
-          end
+          try_open_quiz(name, "trigger_" .. TRIGGER)
         end
       end
     end
@@ -649,14 +711,7 @@ end
         end
       end
 
-      local bank = ensure_question_bank(name)
-      local player_obj = minetest.get_player_by_name(name)
-      if player_obj and bank and #bank > 0 then
-        player_state[name] = create_initial_state()
-        minetest.close_formspec(name, STATUS_FORMNAME)
-        forms.show_question(player_obj, player_state, bank, FORMNAME, forms)
-        quizlog(("openQuiz retry player=%s"):format(name))
-      end
+      try_open_quiz(name, "status_retry")
     end
   end)
 
